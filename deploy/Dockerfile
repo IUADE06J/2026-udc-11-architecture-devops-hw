@@ -16,11 +16,12 @@ RUN node --test
 
 # --- release: lean image, non-root user -------------------------------------
 FROM base AS release
-
-COPY package.json ./
-COPY src ./src
-COPY bin ./bin
-
+COPY --from=test /app/package.json ./
+COPY --from=test /app/src ./src
+COPY --from=test /app/bin ./bin
+COPY --from=test /app/test ./test
+RUN node --test
+RUN rm -rf test
 USER node
 
 EXPOSE 8080

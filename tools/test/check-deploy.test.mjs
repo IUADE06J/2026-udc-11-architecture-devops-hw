@@ -150,9 +150,9 @@ test("C5: contract compose ↔ config for the DB pool", () => {
   // інше значення DB_POOL_MAX — це нормально, правило про контракт, а не про число 20
   const otherValue = svc({ environment: { DB_POOL_MAX: "10", DB_POOL_WAIT_MS: "500" } });
   assert.equal(status("C5", ctx({ compose: compose(otherValue) })), "PASS");
-  // підтримувана змінна пулу відсутня у compose (config.js читає DB_POOL_WAIT_MS)
+  // DB_POOL_WAIT_MS може бути відсутня — застосунок використовує за замовчуванням (config.js:10)
   const missingWaitMs = svc({ environment: { DB_POOL_MAX: "20" } });
-  assert.equal(status("C5", ctx({ compose: compose(missingWaitMs) })), "FAIL");
+  assert.equal(status("C5", ctx({ compose: compose(missingWaitMs) })), "PASS");
   // разовий job без ports: і з restart: "no" не потребує пулу
   const oneShot = svc({ restart: "no", environment: {} });
   assert.equal(status("C5", ctx({ compose: compose(good, oneShot) })), "PASS");
@@ -339,6 +339,7 @@ test("the CLI prints a row per rule, survives broken YAML and exits 1 on failure
         "      API_TOKEN: ${API_TOKEN:?missing}",
         "      DB_POOL_MAX: \"20\"",
         "      DB_POOL_WAIT_MS: \"2000\"",
+        "      DB_POOL_CONNECT_TIMEOUT_MS: \"5000\"",
         "",
       ].join("\n"),
     );
@@ -351,6 +352,7 @@ test("the CLI prints a row per rule, survives broken YAML and exits 1 on failure
         "    dbUrl: env.DATABASE_URL || \"postgres://poshtomat@localhost:5432/poshtomat\",",
         "    dbPoolMax: Number(env.DB_POOL_MAX) || 4,",
         "    dbPoolWaitMs: Number(env.DB_POOL_WAIT_MS) || 2000,",
+        "    dbPoolConnectTimeoutMs: Number(env.DB_POOL_CONNECT_TIMEOUT_MS) || 5000,",
         "  };",
         "}",
       ].join("\n"),

@@ -135,27 +135,167 @@ test("C4: secret-like compose variables come only by reference", () => {
   assert.equal(status("C4", ctx({ compose: compose(svc({ environment: { PGPASSWORD: "CHANGE_ME" } })) })), "FAIL");
 });
 
+function c5Ctx(compose, configText) {
+  const dir = mkdtempSync(join(tmpdir(), "check-deploy-c5-"));
+  try {
+    mkdirSync(join(dir, "app", "src"), { recursive: true });
+    if (configText !== undefined) {
+      writeFileSync(join(dir, "app", "src", "config.js"), configText);
+    }
+    const c = ctx({ compose });
+    c.root = dir;
+    return { dir, ctx: c };
+  } catch {
+    rmSync(dir, { recursive: true, force: true });
+    throw null;
+  }
+}
+
 test("C5: contract compose ↔ config for the DB pool", () => {
-  const good = svc({ environment: { DB_POOL_MAX: "20", DB_POOL_WAIT_MS: "2000", TZ: "Europe/Kyiv", LOG_LEVEL: "info" } });
-  assert.equal(status("C5", ctx({ compose: compose(good) })), "PASS");
+  const config = [
+    "export function loadConfig(env = process.env) {",
+    "  return {",
+    "    dbPoolMax: Number(env.DB_POOL_MAX) || 4,",
+    "    dbPoolWaitMs: Number(env.DB_POOL_WAIT_MS) || 2000,",
+    "  };",
+    "}",
+  ].join("\n");
+
+  const good = svc({ environment: { DB_POOL_MAX: "20", DB_POOL_WAIT_MS: "2000" } });
+  const { dir, ctx: c } = c5Ctx(compose(good), config);
+  try {
+    assert.equal(status("C5", c), "PASS");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
   // інцидент 2026-10-14: DB_POOL_SIZE замість DB_POOL_MAX — код читає лише DB_POOL_MAX
   const incident = svc({ environment: { DB_POOL_SIZE: "20" } });
-  assert.equal(status("C5", ctx({ compose: compose(incident) })), "FAIL");
+  const { dir: d2, ctx: c2 } = c5Ctx(compose(incident), config);
+  try {
+    assert.equal(status("C5", c2), "FAIL");
+  } finally {
+    rmSync(d2, { recursive: true, force: true });
+  }
+
   // без DB_POOL_MAX взагалі
   const noMax = svc({ environment: { DB_POOL_WAIT_MS: "2000" } });
-  assert.equal(status("C5", ctx({ compose: compose(noMax) })), "FAIL");
+  const { dir: d3, ctx: c3 } = c5Ctx(compose(noMax), config);
+  try {
+    assert.equal(status("C5", c3), "FAIL");
+  } finally {
+    rmSync(d3, { recursive: true, force: true });
+  }
+
   // невідома змінна пулу поруч з відомою
   const unknown = svc({ environment: { DB_POOL_MAX: "20", DB_POOL_SIZE: "20" } });
-  assert.equal(status("C5", ctx({ compose: compose(unknown) })), "FAIL");
+  const { dir: d4, ctx: c4 } = c5Ctx(compose(unknown), config);
+  try {
+    assert.equal(status("C5", c4), "FAIL");
+  } finally {
+    rmSync(d4, { recursive: true, force: true });
+  }
+
   // інше значення DB_POOL_MAX — це нормально, правило про контракт, а не про число 20
   const otherValue = svc({ environment: { DB_POOL_MAX: "10", DB_POOL_WAIT_MS: "500" } });
-  assert.equal(status("C5", ctx({ compose: compose(otherValue) })), "PASS");
+  const { dir: d5, ctx: c5 } = c5Ctx(compose(otherValue), config);
+  try {
+    assert.equal(status("C5", c5), "PASS");
+  } finally {
+    rmSync(d5, { recursive: true, force: true });
+  }
+
   // DB_POOL_WAIT_MS може бути відсутня — застосунок використовує за замовчуванням (config.js:10)
   const missingWaitMs = svc({ environment: { DB_POOL_MAX: "20" } });
-  assert.equal(status("C5", ctx({ compose: compose(missingWaitMs) })), "PASS");
+  const { dir: d6, ctx: c6 } = c5Ctx(compose(missingWaitMs), config);
+  try {
+    assert.equal(status("C5", c6), "PASS");
+  } finally {
+    rmSync(d6, { recursive: true, force: true });
+  }
+
   // разовий job без ports: і з restart: "no" не потребує пулу
   const oneShot = svc({ restart: "no", environment: {} });
-  assert.equal(status("C5", ctx({ compose: compose(good, oneShot) })), "PASS");
+  const { dir: d7, ctx: c7 } = c5Ctx(compose(good, oneShot), config);
+  try {
+    assert.equal(status("C5", c7), "PASS");
+  } finally {
+    rmSync(d7, { recursive: true, force: true });
+  }
+});
+
+test("C5: відсутній config.js — зрозумілий FAIL", () => {
+  const good = svc({ environment: { DB_POOL_MAX: "20" } });
+  const { dir, ctx: c } = c5Ctx(compose(good));
+  try {
+    assert.equal(status("C5", c), "FAIL");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // перевіряємо повідомлення через runChecks
+  const results = runChecks(c);
+  const c5 = results.find((r) => r.id === "C5");
+  assert.equal(c5.status, "FAIL");
+  assert.ok(/config.js відсутній/.test(c5.message));
+});
+
+test("C5: читання через псевдонім env (const e = env; e.DB_POOL_MAX)", () => {
+  const config = [
+    "export function loadConfig(env = process.env) {",
+    "  const e = env;",
+    "  return {",
+    "    dbPoolMax: Number(e.DB_POOL_MAX) || 4,",
+    "    dbPoolWaitMs: Number(e.DB_POOL_WAIT_MS) || 2000,",
+    "  };",
+    "}",
+  ].join("\n");
+
+  const good = svc({ environment: { DB_POOL_MAX: "20", DB_POOL_WAIT_MS: "2000" } });
+  const { dir, ctx: c } = c5Ctx(compose(good), config);
+  try {
+    assert.equal(status("C5", c), "PASS");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C5: коментар із env.DB_POOL_SIZE не сприймається як реальне звернення", () => {
+  const config = [
+    "// env.DB_POOL_SIZE is obsolete — use DB_POOL_MAX instead",
+    "export function loadConfig(env = process.env) {",
+    "  return {",
+    "    dbPoolMax: Number(env.DB_POOL_MAX) || 4,",
+    "    dbPoolWaitMs: Number(env.DB_POOL_WAIT_MS) || 2000,",
+    "  };",
+    "}",
+  ].join("\n");
+
+  const good = svc({ environment: { DB_POOL_MAX: "20", DB_POOL_WAIT_MS: "2000" } });
+  const { dir, ctx: c } = c5Ctx(compose(good), config);
+  try {
+    assert.equal(status("C5", c), "PASS");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C5: DB_POOL_MAX обов'язкова, інші DB_POOL_* не вимагаються у compose", () => {
+  const config = [
+    "export function loadConfig(env = process.env) {",
+    "  return {",
+    "    dbPoolMax: Number(env.DB_POOL_MAX) || 4,",
+    "  };",
+    "}",
+  ].join("\n");
+
+  // лише DB_POOL_MAX у compose — DB_POOL_WAIT_MS не обов'язкова
+  const onlyMax = svc({ environment: { DB_POOL_MAX: "20" } });
+  const { dir, ctx: c } = c5Ctx(compose(onlyMax), config);
+  try {
+    assert.equal(status("C5", c), "PASS");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("W1: the workflow exists, parses, and does not use pull_request_target", () => {

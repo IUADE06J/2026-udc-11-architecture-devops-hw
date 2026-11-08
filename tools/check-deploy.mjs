@@ -580,17 +580,28 @@ export const RULES = [
       // Підтримувані DB_POOL_* зчитуємо з config.js (loadConfig), а не тримаємо жорстко закодованим списком.
       const configPath = join(root, "app", "src", "config.js");
       const knownPoolVars = new Set();
-      if (existsSync(configPath)) {
+      let configMissing = false;
+      if (!existsSync(configPath)) {
+        configMissing = true;
+      } else {
         const configText = readFileSync(configPath, "utf8");
         const code = jsCodeOnly(configText);
         // env.DB_POOL_MAX / env?.DB_POOL_MAX — ідентифікатори переживають прибирання рядків і коментарів.
         for (const m of code.matchAll(/env\??\.(DB_POOL_\w+)/g)) knownPoolVars.add(m[1]);
         // env['DB_POOL_MAX'] / env["DB_POOL_MAX"] — ім'я змінної всередині рядкового літерала,
-        // який jsCodeOnly видаляє, тому шукаємо у сирому тексті (узор специфічний, хибних збігів мало).
-        for (const m of configText.matchAll(/env\[['"](DB_POOL_\w+)['"]\]/g)) knownPoolVars.add(m[1]);
+        // який jsCodeOnly видаляє, тому шукаємо у сирому тексті без коментарів (щоб не потрапило з коментаря).
+        const textWithoutComments = configText
+          .replace(/\/\/[^\n]*/g, "")
+          .replace(/\/\*[\s\S]*?\*\//g, "");
+        for (const m of textWithoutComments.matchAll(/env\[['"](DB_POOL_\w+)['"]\]/g)) knownPoolVars.add(m[1]);
         // { DB_POOL_MAX } = env — деструктуризація з env.
         for (const m of code.matchAll(/\{\s*([^}]*?)\s*\}\s*=\s*env/g)) {
           for (const vm of m[1].matchAll(/DB_POOL_\w+/g)) knownPoolVars.add(vm[0]);
+        }
+        // const e = env; e.DB_POOL_MAX — читання через псевдонім env.
+        for (const m of code.matchAll(/(?:const|let|var)\s+([A-Za-z_]\w*)\s*=\s*env\b/g)) {
+          const alias = m[1];
+          for (const mm of code.matchAll(new RegExp(`\\b${alias}\\.(DB_POOL_\\w+)`, "g"))) knownPoolVars.add(mm[1]);
         }
       }
 
@@ -610,19 +621,23 @@ export const RULES = [
         // Композ → конфіг: немає застарілих змінних пулу.
         for (const [k] of poolVars) {
           if (!knownPoolVars.has(k)) {
-            problems.push(`${name}: невідома змінна пулу ${k} (config.js читає лише ${[...knownPoolVars].sort().join(", ")})`);
+            problems.push(`${name}: невідома змінна пулу ${k} (config.js читає лише ${[...knownPoolVars].sort().join(", ") || "(config.js відсутній)"})`);
           }
         }
       }
 
-      // Конфіг → композ: кожна підтримувана змінна пулу оголошена в композі хоча б раз.
-      // DB_POOL_WAIT_MS може бути відсутня — застосунок використовує значення за замовчуванням (config.js:10).
+      // Конфіг → композ: DB_POOL_MAX обов'язкова у кожному довгоживучому сервісі (перевіряється вище).
+      // Інші DB_POOL_* (наприклад DB_POOL_WAIT_MS) можуть бути відсутні — застосунок використовує значення за замовчуванням.
       const optionalPoolVars = new Set(["DB_POOL_WAIT_MS"]);
       for (const k of [...knownPoolVars].sort()) {
-        if (optionalPoolVars.has(k)) continue;
+        if (k === "DB_POOL_MAX" || optionalPoolVars.has(k)) continue;
         if (!allPoolVarNames.has(k)) {
           problems.push(`підтримувана змінна пулу ${k} відсутня у compose (config.js читає env.${k})`);
         }
+      }
+
+      if (configMissing) {
+        problems.push(`app/src/config.js відсутній — неможливо перевірити контракт compose ↔ config для пулу БД`);
       }
 
       return problems.length ? fail(problems.join("; ")) : pass("контракт compose ↔ config для пулу БД соблюдено");

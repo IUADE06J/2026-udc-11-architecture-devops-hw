@@ -5,7 +5,7 @@
 
 services:
   api:
-    image: ghcr.io/${GHCR_OWNER:-poshtomat}/poshtomat:${TAG:-sha-local}
+    image: ghcr.io/${GHCR_OWNER:-poshtomat}/poshtomat:${TAG:?IMAGE_TAG must be set}
     build:
       context: ../app
       dockerfile: ../deploy/Dockerfile
@@ -37,12 +37,19 @@ services:
           memory: 512M
 
   worker:
-    image: ghcr.io/${GHCR_OWNER:-poshtomat}/poshtomat:${TAG:-sha-local}
+    image: ghcr.io/${GHCR_OWNER:-poshtomat}/poshtomat:${TAG:?IMAGE_TAG must be set}
     build:
       context: ../app
       dockerfile: ../deploy/Dockerfile
     command: ["node", "src/worker.js"]
     restart: unless-stopped
+    # Worker не запускає HTTP-сервер — перевіряємо, що процес працює
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep -q '[w]orker.js' || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     environment:
       TZ: "Europe/Kyiv"
       LOG_LEVEL: "info"

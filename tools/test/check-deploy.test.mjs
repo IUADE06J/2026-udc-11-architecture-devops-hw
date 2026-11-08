@@ -150,6 +150,9 @@ test("C5: contract compose ↔ config for the DB pool", () => {
   // інше значення DB_POOL_MAX — це нормально, правило про контракт, а не про число 20
   const otherValue = svc({ environment: { DB_POOL_MAX: "10", DB_POOL_WAIT_MS: "500" } });
   assert.equal(status("C5", ctx({ compose: compose(otherValue) })), "PASS");
+  // підтримувана змінна пулу відсутня у compose (config.js читає DB_POOL_WAIT_MS)
+  const missingWaitMs = svc({ environment: { DB_POOL_MAX: "20" } });
+  assert.equal(status("C5", ctx({ compose: compose(missingWaitMs) })), "FAIL");
   // разовий job без ports: і з restart: "no" не потребує пулу
   const oneShot = svc({ restart: "no", environment: {} });
   assert.equal(status("C5", ctx({ compose: compose(good, oneShot) })), "PASS");
@@ -320,6 +323,7 @@ test("the CLI prints a row per rule, survives broken YAML and exits 1 on failure
   try {
     mkdirSync(join(dir, "deploy"));
     mkdirSync(join(dir, "pipeline"));
+    mkdirSync(join(dir, "app", "src"), { recursive: true });
     writeFileSync(join(dir, "deploy", "Dockerfile"), "FROM example/base:2.1\nUSER app\nCMD [\"run\"]\n");
     writeFileSync(
       join(dir, "deploy", "compose.yaml"),
@@ -334,7 +338,21 @@ test("the CLI prints a row per rule, survives broken YAML and exits 1 on failure
         "    environment:",
         "      API_TOKEN: ${API_TOKEN:?missing}",
         "      DB_POOL_MAX: \"20\"",
+        "      DB_POOL_WAIT_MS: \"2000\"",
         "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(dir, "app", "src", "config.js"),
+      [
+        "export function loadConfig(env = process.env) {",
+        "  return {",
+        "    port: Number(env.PORT) || 8080,",
+        "    dbUrl: env.DATABASE_URL || \"postgres://poshtomat@localhost:5432/poshtomat\",",
+        "    dbPoolMax: Number(env.DB_POOL_MAX) || 4,",
+        "    dbPoolWaitMs: Number(env.DB_POOL_WAIT_MS) || 2000,",
+        "  };",
+        "}",
       ].join("\n"),
     );
     writeFileSync(join(dir, "pipeline", "deploy.yml"), "on: [push\njobs:\n  a: {}\n");

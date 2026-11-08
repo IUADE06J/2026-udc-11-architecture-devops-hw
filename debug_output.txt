@@ -1,0 +1,17 @@
+Full line: '| 10 | SMS-провайдер → Мешканець: доставляє SMS з кодом, GSM |зовнішній канал, описано в `materials/vendors/sms-provider.md:13-19` | є | є |'
+Line length: 140
+
+From "зовнішній канал":
+'зовнішній канал, описано в `materials/vendors/sms-provider.md:13-19` | є | є |'
+Hex: d0b7d0bed0b2d0bdd196d188d0bdd196d0b920d0bad0b0d0bdd0b0d0bb2c20d0bed0bfd0b8d181d0b0d0bdd0be20d0b220606d6174657269616c732f76656e646f72732f736d732d70726f76696465722e6d643a31332d313960207c20d194207c20d194207c
+
+Last 20 chars: '.md:13-19` | є | є |'
+Last 20 chars hex: 2e6d643a31332d313960207c20d194207c20d194207c
+
+=== Debug row10e ===
+Found "зовнішній канал" at index: 6428
+Snippet: 'зовнішній канал, описано в `materials/vendors/sms-provider.md:13-19` | є | є |\n| 11 | Мешканець → Ек'
+Hex: d0b7d0bed0b2d0bdd196d188d0bdd196d0b920d0bad0b0d0bdd0b0d0bb2c20d0bed0bfd0b8d181d0b0d0bdd0be20d0b220606d6174657269616c732f76656e646f72732f736d732d70726f76696465722e6d643a31332d313960207c20d194207c20d194207c0a7c203131207c20d09cd0b5d188d0bad0b0d0bdd0b5d186d18c20e2869220d095d0ba
+old10 hex: d0b7d0bed0b2d0bdd196d188d0bdd196d0b920d0bad0b0d0bdd0b0d0bb2c20d0bed0bfd0b8d181d0b0d0bdd0be20d0b220606d6174657269616c732f76656e646f72732f736d732d70726f76696465722e6d643a31332d313960207c20d084207c20d084207c
+old10 in content_bytes: False
+old10 bytes found at: -1

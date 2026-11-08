@@ -536,25 +536,46 @@ export const RULES = [
     id: "C5",
     title: "Контракт compose ↔ config для пулу БД (DB_POOL_*)",
     hint: "Кожен довгоживучий сервіс має DB_POOL_MAX у environment; кожен DB_POOL_* у compose має бути змінною, яку читає app/src/config.js (DB_POOL_MAX, DB_POOL_WAIT_MS). Разові job без ports: і з restart: \"no\" виключені.",
-    check({ compose }) {
+    check({ compose, root }) {
       const problem = composeProblem(compose);
       if (problem) return problem;
-      const knownPoolVars = new Set(["DB_POOL_MAX", "DB_POOL_WAIT_MS"]);
+
+      // Підтримувані DB_POOL_* зчитуємо з config.js (loadConfig), а не тримаємо жорстко закодованим списком.
+      const configPath = join(root, "app", "src", "config.js");
+      const knownPoolVars = new Set();
+      if (existsSync(configPath)) {
+        const configText = readFileSync(configPath, "utf8");
+        for (const m of configText.matchAll(/env\.(DB_POOL_\w+)/g)) knownPoolVars.add(m[1]);
+      }
+
       const problems = [];
+      const allPoolVarNames = new Set(); // усі DB_POOL_*, що зустрічаються у довгоживучих сервісах
+
       for (const [name, svc] of services(compose)) {
         if (oneShot(svc)) continue;
         const entries = envEntries(svc?.environment);
         const poolVars = entries.filter(([k]) => /^DB_POOL_/.test(k));
         const poolVarNames = new Set(poolVars.map(([k]) => k));
+        for (const k of poolVarNames) allPoolVarNames.add(k);
+
         if (!poolVarNames.has("DB_POOL_MAX")) {
           problems.push(`${name}: немає DB_POOL_MAX у environment`);
         }
+        // Композ → конфіг: немає застарілих змінних пулу.
         for (const [k] of poolVars) {
           if (!knownPoolVars.has(k)) {
             problems.push(`${name}: невідома змінна пулу ${k} (config.js читає лише ${[...knownPoolVars].sort().join(", ")})`);
           }
         }
       }
+
+      // Конфіг → композ: кожна підтримувана змінна пулу оголошена в композі хоча б раз.
+      for (const k of [...knownPoolVars].sort()) {
+        if (!allPoolVarNames.has(k)) {
+          problems.push(`підтримувана змінна пулу ${k} відсутня у compose (config.js читає env.${k})`);
+        }
+      }
+
       return problems.length ? fail(problems.join("; ")) : pass("контракт compose ↔ config для пулу БД соблюдено");
     },
   },

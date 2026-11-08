@@ -22,10 +22,10 @@ C4Context
     System_Ext(courierApi, "API кур'єрської компанії", "Приймає заявки на повернення посилок (POST /returns)")
 
     Rel(resident, lockerScreen, "Вводить 6-значний код отримання")
-    Rel(lockerScreen, lockerSystem, "POST /pickup — перевірка коду", "HTTPS/JSON")
+    Rel(lockerScreen, lockerSystem, "POST /pickup — перевірка коду", "HTTP/JSON")
     Rel(courier, scanner, "Сканує посилку в комірку")
-    Rel(scanner, lockerSystem, "POST /parcels — реєстрація посилки", "HTTPS/JSON")
-    Rel(staff, lockerSystem, "GET /admin/parcels — список посилок (Bearer-сесія)", "HTTPS/JSON")
+    Rel(scanner, lockerSystem, "POST /parcels — реєстрація посилки", "HTTP/JSON")
+    Rel(staff, lockerSystem, "GET /admin/parcels — список посилок (Bearer-сесія)", "HTTP/JSON")
     Rel(monitoring, lockerSystem, "GET /health — перевірка стану", "HTTP/JSON")
     Rel(lockerSystem, smsProvider, "Замовляє надсилання SMS (через worker)", "HTTP API")
     Rel(smsProvider, resident, "Доставляє SMS з кодом", "GSM")
@@ -51,17 +51,17 @@ C4Container
     System_Ext(courierApi, "API кур'єрської компанії", "HTTP API POST /returns")
 
     System_Boundary(lockerSystem, "Поштомат громади — одна VM, docker compose") {
-        Container(api, "API", "Node.js, src/server.js", "HTTP API на порту 8080: POST /parcels, POST /pickup, GET /admin/parcels, GET /health; пул з'єднань до БД (max 4)")
+        Container(api, "API", "Node.js, src/server.js", "HTTP API на порту 8080: POST /parcels, POST /pickup, GET /admin/parcels, GET /health; пул з'єднань до БД (DB_POOL_MAX=20 у compose; резервний дефолт max 4)")
         Container(worker, "Worker", "Node.js, src/worker.js", "Опрос несповіщених посилок кожні 10 с (пакети по 50) і надсилання SMS через src/sms.js")
         Container(expire, "Задача прострочення посилок", "Node.js, bin/expire-parcels.js", "Скрипт, запускається cron о 03:15: посилки > 72 год → returned + заявка кур'єру")
         ContainerDb(db, "PostgreSQL", "PostgreSQL (т. ж. VM, поза контейнерами)", "Посилки, події, сесії персоналу; локально/тести — in-memory store (src/db.js)")
     }
 
     Rel(resident, lockerScreen, "Вводить код отримання")
-    Rel(lockerScreen, api, "POST /pickup — перевірка коду", "HTTPS/JSON")
+    Rel(lockerScreen, api, "POST /pickup — перевірка коду", "HTTP/JSON")
     Rel(courier, scanner, "Сканує посилку в комірку")
-    Rel(scanner, api, "POST /parcels — реєстрація посилки", "HTTPS/JSON")
-    Rel(staff, api, "GET /admin/parcels (Bearer-сесія)", "HTTPS/JSON")
+    Rel(scanner, api, "POST /parcels — реєстрація посилки", "HTTP/JSON")
+    Rel(staff, api, "GET /admin/parcels (Bearer-сесія)", "HTTP/JSON")
     Rel(monitoring, api, "GET /health — перевірка стану", "HTTP/JSON")
     Rel(api, db, "Читання/запис посилок, подій, сесій", "TCP 5432 (пул)")
     Rel(worker, db, "Несповіщені посилки, оновлення notifiedAt", "TCP 5432 (пул)")
@@ -79,37 +79,37 @@ C4Container
 
 | # | Стрілка (звідки → куди: що і як) | Доказ (`файл:рядок`) | AI з документації | AI з коду |
 |---|---|---|---|---|
-| 1 | Мешканець → Екран поштомата: вводить 6-значний код отримання |user-дія, підтверджується потоком `POST /pickup` (`app/src/server.js:42-46`) | є | є |
-| 2 | Екран поштомата → API: `POST /pickup` — перевірка коду, HTTPS/JSON | `app/src/server.js:42-46` | є | є |
-| 3 | Працівник служби доставки → Сканер: сканує посилку в комірку | `app/docs/ARCHITECTURE.md:9-11` (схема: сканер → API), сканер — зовнішній пристрій | є | є |
-| 4 | Сканер → API: `POST /parcels` — реєстрація посилки, HTTPS/JSON | `app/src/server.js:38-41` | є | є |
-| 5 | Персонал → API: `GET /admin/parcels` — список посилок (Bearer-сесія), HTTPS/JSON | `app/src/server.js:47-50` | є | є |
+| 1 | Мешканець → Екран поштомата: вводить 6-значний код отримання |user-дія, підтверджується потоком `POST /pickup` (`app/src/server.js:42-46`) | документація — 4 цифри, код — 6 (розбіжність) | є |
+| 2 | Екран поштомата → API: `POST /pickup` — перевірка коду, HTTP/JSON | `app/src/server.js:42-46` (маршрутний обробник сам по собі не підтверджує TLS) | є | є |
+| 3 | Працівник служби доставки → Сканер: сканує посилку в комірку | `app/docs/ARCHITECTURE.md:9-11` (сканер об'єднано з кур'єром — не окрема стрілка системи) | є | пропущено |
+| 4 | Сканер → API: `POST /parcels` — реєстрація посилки, HTTP/JSON | `app/src/server.js:38-41` (маршрутний обробник сам по собі не підтверджує TLS) | є | пропущено |
+| 5 | Персонал → API: `GET /admin/parcels` — список посилок (Bearer-сесія), HTTP/JSON | `app/src/server.js:47-50` (маршрутний обробник сам по собі не підтверджує TLS) | є | є |
 | 6 | Моніторинг → API: `GET /health` — перевірка стану, HTTP/JSON | `app/src/server.js:37` | є | є |
 | 7 | API → PostgreSQL: читання/запис посилок, подій, сесій, TCP 5432 | `app/src/server.js:38-39` → `app/src/parcels.js:35-55` → `app/src/db.js:63-101` | є | є |
 | 8 | Worker → SMS-провайдер: надсилає SMS про прибуття, HTTP API POST /messages | `app/src/worker.js:28` (`sms.send`), `app/src/sms.js:31` (`fetch /messages`) | є | є |
 | 9 | API → API кур'єрської компанії: заявка на повернення простроченої посилки, HTTP API | `app/bin/expire-parcels.js:15` → `app/src/courier.js:7-8` | пропустив — немає `courierApi` в diagramі з документації | є |
-| 10 | SMS-провайдер → Мешканець: доставляє SMS з кодом, GSM |зовнішній канал, описано в `materials/vendors/sms-provider.md:13-19` | є | є |
+| 10 | SMS-провайдер → Мешканець: доставляє SMS з кодом, GSM |зовнішній канал, описано в `materials/vendors/sms-provider.md:13-19` | є | пропущено |
 | 11 | Мешканець → Екран поштомата: вводить код отримання (Container) | user-дія, підтверджується `POST /pickup` (`app/src/server.js:42-46`) | є | є |
-| 12 | Екран поштомата → API: `POST /pickup`, HTTPS/JSON (Container) | `app/src/server.js:42-46` | є | є |
-| 13 | Працівник служби доставки → Сканер: сканує посилку (Container) | `app/docs/ARCHITECTURE.md:9-11` (схема: сканер → API), сканер — зовнішній пристрій | є | є |
-| 14 | Сканер → API: `POST /parcels`, HTTPS/JSON (Container) | `app/src/server.js:38-41` | є | є |
-| 15 | Персонал → API: `GET /admin/parcels`, HTTPS/JSON (Container) | `app/src/server.js:47-50` | є | є |
+| 12 | Екран поштомата → API: `POST /pickup`, HTTP/JSON (Container) | `app/src/server.js:42-46` (маршрутний обробник сам по собі не підтверджує TLS) | є | є |
+| 13 | Працівник служби доставки → Сканер: сканує посилку (Container) | `app/docs/ARCHITECTURE.md:9-11` (сканер об'єднано з кур'єром — не окрема стрілка системи) | є | пропущено |
+| 14 | Сканер → API: `POST /parcels`, HTTP/JSON (Container) | `app/src/server.js:38-41` (маршрутний обробник сам по собі не підтверджує TLS) | є | пропущено |
+| 15 | Персонал → API: `GET /admin/parcels`, HTTP/JSON (Container) | `app/src/server.js:47-50` (маршрутний обробник сам по собі не підтверджує TLS) | є | є |
 | 16 | Моніторинг → API: `GET /health`, HTTP/JSON (Container) | `app/src/server.js:37` | є | є |
 | 17 | API → PostgreSQL: читання/запис посилок, подій, сесій, TCP 5432 (Container) | `app/src/server.js:38-39` → `app/src/parcels.js:35-55` → `app/src/db.js:63-101` | є | є |
 | 18 | Worker → PostgreSQL: несповіщені посилки, оновлення `notifiedAt`, TCP 5432 | `app/src/worker.js:24` (`listUnnotified`), `:33` (`updateParcel notifiedAt`) | є | є |
 | 19 | Worker → SMS-провайдер: SMS про прибуття, HTTP API `POST /messages` | `app/src/worker.js:28` (`sms.send`), `app/src/sms.js:31` (`fetch /messages`) | є | є |
 | 20 | Задача прострочення → PostgreSQL: пошук прострочених, оновлення статусу, TCP 5432 | `app/bin/expire-parcels.js:12` (`findExpired`), `:14` (`markReturned`) | є (як `nightJob → db`) | є |
 | 21 | Задача прострочення → API кур'єра: заявка на повернення, HTTP API `POST /returns` | `app/bin/expire-parcels.js:15` (`courier.requestReturn`), `app/src/courier.js:7-8` | пропустив — немає `courierApi` в diagramі з документації | є |
-| 22 | SMS-провайдер → Мешканець: доставляє SMS з кодом, GSM (Container) |зовнішній канал, `materials/vendors/sms-provider.md:13-19` | є | є |
+| 22 | SMS-провайдер → Мешканець: доставляє SMS з кодом, GSM (Container) |зовнішній канал GSM, `materials/vendors/sms-provider.md:13-19` (не системне з'єднання в коді) | є | пропущено |
 
 ## Що AI вигадав / пропустив
 
 | Прогін | Вигадав — стрілки й компоненти, яких у коді немає (і чим перевірено) | Пропустив — стрілки з таблиці вище, яких немає в AI |
 |---|---|---|
 | з документації (`c4-from-docs.md`) | - Вказав інтервал worker **30 секунд** (`c4-from-docs.md:72`), але в коді `POLL_INTERVAL_MS = 10_000` (`app/src/worker.js:8`). У `docs/ARCHITECTURE.md:19` також 30 с — це розбіжність документації з кодом.<br>- Показав `nightJob` як окрема контейнер (`c4-from-docs.md:73`), але це cron-скрипт (`bin/expire-parcels.js`), що запускається на VM, а не docker-контейнер. | #9 — API → API кур'єра (немає `courierApi` зовнішньої системи)<br>#21 — Задача прострочення → API кур'єра |
-| з коду (`c4-from-code.md`) | - Показав `expire` як окрему контейнер всередині `docker compose` (`c4-from-code.md:76`), але це скрипт, запускається cron на VM, а не сервіс docker compose.<br- Писував "теки `deploy/` не знайдено" (`c4-from-code.md:19`), але `deploy/` існує: `Dockerfile` і `compose.yaml`. | немає — має всі стрілки з таблиці вище |
+| з коду (`c4-from-code.md`) | - Показав `expire` як окрему контейнер всередині `docker compose` (`c4-from-code.md:76`), але це скрипт, запускається cron на VM, а не сервіс docker compose.<br- Писував "теки `deploy/` не знайдено" (`c4-from-code.md:19`), але `deploy/` існує: `Dockerfile` і `compose.yaml`. | #3 — Працівник → Сканер<br>#4 — Сканер → API<br>#10 — SMS-провайдер → Мешканець<br>#13 — Працівник → Сканер (Container)<br>#14 — Сканер → API (Container)<br>#22 — SMS-провайдер → Мешканець (Container) |
 
-**Разом:** з документації — вигадано 2 (невірний інтервал worker, невірний тип nightJob), пропущено 2 (#9, #21); з коду — вигадано 2 (невірний тип expire контейнера, невірна відсутність `deploy/`), пропущено 0.
+**Разом:** з документації — вигадано 2 (невірний інтервал worker, невірний тип nightJob), розбіжність у довжині коду отримання (документація — 4 цифри, код — 6), пропущено 2 (#9, #21); з коду — вигадано 2 (невірний тип expire контейнера, невірна відсутність `deploy/`), пропущено 6 (#3, #4, #10, #13, #14, #22).
 
 ## Запропоноване (з ADR) — необов'язково
 

@@ -22,7 +22,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: "npm"
 
       - name: Run tests
         run: npm test
@@ -93,14 +92,22 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts
+          SCANNED_KEY=$(ssh-keyscan "${{ secrets.PROD_HOST }}" 2>/dev/null)
+          if [ "$SCANNED_KEY" != "${{ secrets.PROD_HOST_KEY }}" ]; then
+            echo "ERROR: SSH host key for ${{ secrets.PROD_HOST }} does not match trusted key — aborting" >&2
+            exit 1
+          fi
+          echo "$SCANNED_KEY" >> ~/.ssh/known_hosts
 
           printf '%s\n' "$COMPOSE_ENV" > /tmp/compose.env
-          scp -r deploy "${{ secrets.SSH_USER }}@${{ secrets.PROD_HOST }}:~/poshtomat/deploy"
+          chmod 600 /tmp/compose.env
+          scp -r deploy/. "${{ secrets.SSH_USER }}@${{ secrets.PROD_HOST }}:~/poshtomat/deploy/"
           scp /tmp/compose.env "${{ secrets.SSH_USER }}@${{ secrets.PROD_HOST }}:~/poshtomat/deploy/.env"
 
           ssh "${{ secrets.SSH_USER }}@${{ secrets.PROD_HOST }}" '
+            set -e
             cd ~/poshtomat
+            chmod 600 deploy/.env
             docker compose -f deploy/compose.yaml --env-file deploy/.env pull
             docker compose -f deploy/compose.yaml --env-file deploy/.env up -d
             for i in $(seq 1 30); do

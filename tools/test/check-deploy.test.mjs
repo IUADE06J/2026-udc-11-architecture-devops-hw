@@ -135,6 +135,26 @@ test("C4: secret-like compose variables come only by reference", () => {
   assert.equal(status("C4", ctx({ compose: compose(svc({ environment: { PGPASSWORD: "CHANGE_ME" } })) })), "FAIL");
 });
 
+test("C5: contract compose ↔ config for the DB pool", () => {
+  const good = svc({ environment: { DB_POOL_MAX: "20", DB_POOL_WAIT_MS: "2000", TZ: "Europe/Kyiv", LOG_LEVEL: "info" } });
+  assert.equal(status("C5", ctx({ compose: compose(good) })), "PASS");
+  // інцидент 2026-10-14: DB_POOL_SIZE замість DB_POOL_MAX — код читає лише DB_POOL_MAX
+  const incident = svc({ environment: { DB_POOL_SIZE: "20" } });
+  assert.equal(status("C5", ctx({ compose: compose(incident) })), "FAIL");
+  // без DB_POOL_MAX взагалі
+  const noMax = svc({ environment: { DB_POOL_WAIT_MS: "2000" } });
+  assert.equal(status("C5", ctx({ compose: compose(noMax) })), "FAIL");
+  // невідома змінна пулу поруч з відомою
+  const unknown = svc({ environment: { DB_POOL_MAX: "20", DB_POOL_SIZE: "20" } });
+  assert.equal(status("C5", ctx({ compose: compose(unknown) })), "FAIL");
+  // інше значення DB_POOL_MAX — це нормально, правило про контракт, а не про число 20
+  const otherValue = svc({ environment: { DB_POOL_MAX: "10", DB_POOL_WAIT_MS: "500" } });
+  assert.equal(status("C5", ctx({ compose: compose(otherValue) })), "PASS");
+  // разовий job без ports: і з restart: "no" не потребує пулу
+  const oneShot = svc({ restart: "no", environment: {} });
+  assert.equal(status("C5", ctx({ compose: compose(good, oneShot) })), "PASS");
+});
+
 test("W1: the workflow exists, parses, and does not use pull_request_target", () => {
   assert.equal(status("W1", ctx({ workflow: wf() })), "PASS");
   assert.equal(status("W1", ctx({})), "FAIL");
@@ -313,6 +333,7 @@ test("the CLI prints a row per rule, survives broken YAML and exits 1 on failure
         "    image: example/web:1.0.0",
         "    environment:",
         "      API_TOKEN: ${API_TOKEN:?missing}",
+        "      DB_POOL_MAX: \"20\"",
         "",
       ].join("\n"),
     );
@@ -330,7 +351,7 @@ test("the CLI prints a row per rule, survives broken YAML and exits 1 on failure
     const rows = Object.fromEntries(out.split("\n").filter((l) => /^[DCW]\d /.test(l)).map((l) => [l.slice(0, 2), l.slice(4, 8)]));
     assert.deepEqual(rows, {
       D1: "PASS", D2: "PASS", D3: "FAIL", D4: "PASS",
-      C1: "PASS", C2: "PASS", C3: "PASS", C4: "PASS",
+      C1: "PASS", C2: "PASS", C3: "PASS", C4: "PASS", C5: "PASS",
       W1: "FAIL", W2: "SKIP", W3: "SKIP", W4: "SKIP", W5: "SKIP",
     });
     assert.match(out, /W1 +FAIL .*не розібрався як YAML/);

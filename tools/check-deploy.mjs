@@ -533,6 +533,32 @@ export const RULES = [
     },
   },
   {
+    id: "C5",
+    title: "Контракт compose ↔ config для пулу БД (DB_POOL_*)",
+    hint: "Кожен довгоживучий сервіс має DB_POOL_MAX у environment; кожен DB_POOL_* у compose має бути змінною, яку читає app/src/config.js (DB_POOL_MAX, DB_POOL_WAIT_MS). Разові job без ports: і з restart: \"no\" виключені.",
+    check({ compose }) {
+      const problem = composeProblem(compose);
+      if (problem) return problem;
+      const knownPoolVars = new Set(["DB_POOL_MAX", "DB_POOL_WAIT_MS"]);
+      const problems = [];
+      for (const [name, svc] of services(compose)) {
+        if (oneShot(svc)) continue;
+        const entries = envEntries(svc?.environment);
+        const poolVars = entries.filter(([k]) => /^DB_POOL_/.test(k));
+        const poolVarNames = new Set(poolVars.map(([k]) => k));
+        if (!poolVarNames.has("DB_POOL_MAX")) {
+          problems.push(`${name}: немає DB_POOL_MAX у environment`);
+        }
+        for (const [k] of poolVars) {
+          if (!knownPoolVars.has(k)) {
+            problems.push(`${name}: невідома змінна пулу ${k} (config.js читає лише ${[...knownPoolVars].sort().join(", ")})`);
+          }
+        }
+      }
+      return problems.length ? fail(problems.join("; ")) : pass("контракт compose ↔ config для пулу БД соблюдено");
+    },
+  },
+  {
     id: "W1",
     title: "pipeline/deploy.yml існує, валідний YAML, без pull_request_target",
     hint: "Створіть pipeline/deploy.yml (не в .github/workflows/) з on: і jobs:. Тригер pull_request_target дає коду з чужого PR доступ до секретів — не використовуйте його.",
